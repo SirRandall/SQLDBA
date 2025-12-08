@@ -612,6 +612,10 @@ You should confirm the instance is running before continuing on to configuring t
 
 $ask1 = Read-Continue -message "
 
+
+break
+
+
 SQL Server configuration of $TargetName is completed.
 " -prompt "Would you like to proceed with copying databases over from $sourceName " -color $ProgressColor
        If (($ask1 -eq "") -or ($ask1 -eq "N")) {

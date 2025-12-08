@@ -1,15 +1,11 @@
-﻿<# 20251022 Randy Sheldon
-
-    Used to prepare, install and update SQL Server
-#>
+﻿# 20251022 Randy Sheldon    Used to prepare, install and update SQL Server
 
 #region Parameter Review 
-    #Change these as needed
-    [String]$ProgressColor    = "Cyan"
-    [string]$InformationColor = "White"
-    [string]$WarningColor     = "Yellow"
-    [string]$ErrorColor       = "Red"
-    [string]$PromptColor      = "Green"
+    #SQL Disk Mapping values
+    [string]$AppDrive    = "D"
+    [string]$DataDrive   = "F"
+    [string]$LogsDrive   = "G"
+    [string]$TempDBDrive = "H"
 
     #Connection values
     [string]$SourceName = ""
@@ -19,12 +15,13 @@
     [string]$SQLSVCACCOUNT = ""   
     [string]$SAPWD=""  
 
-    #SQL Disk Mapping values
-    [string]$AppDrive    = "D"
-    [string]$DataDrive   = "F"
-    [string]$LogsDrive   = "G"
-    [string]$TempDBDrive = "H"
+    #Prompt colors
+    [string]$WarningColor     = "Yellow"
+    [string]$ErrorColor       = "Red"
+    [string]$PromptColor      = "Green"
 #endregion Parameter Review 
+
+cls
 
 #region EmbeddedFunctions
 Function New-DirectoryIfMissing {
@@ -166,17 +163,15 @@ function Read-Continue {
 
 #endregion EmbeddedFunctions
 
-cls
-
 write-host "Prepping orchestrated SQL Server installation..." -foregroundColor $ProgressColor
 
 #region modules
     #Install/confirm sqlServer powershell module
-        Ensure-ModuleInstalled -moduleName sqlserver
-        Ensure-ModuleInstalled -moduleName dbatools #-Force
+        Ensure-ModuleInstalled -moduleName dbatools -Force
+#        Ensure-ModuleInstalled -moduleName sqlserver
 
         Ensure-ModuleImported  -ModuleName dbaTools
-        Ensure-Moduleimported  -ModuleName sqlserver
+#        Ensure-Moduleimported  -ModuleName sqlserver
 #endregion modules
 
 #region Define Connections
@@ -261,12 +256,13 @@ You are running this script on the target server [$TargetName]." -ForegroundColo
 " -ForegroundColor $promptcolor
 
 
+        [string]$sharedPath = '\\' + $TargetName + '\D$\temp\for_restore'
+
         $Ask1 = Read-Continue -message "" -prompt "Would you like to proceed?"
         If (($ask1 -eq "") -or ($ask1 -eq "N")) {
         break
         }
 
-            [string]$sharedPath = '\\' + $TargetName + '\D$\temp\for_restore'
 
 
         #endregion DiskMapping
@@ -277,19 +273,12 @@ You are running this script on the target server [$TargetName]." -ForegroundColo
 write-host "Creating required directories..." -ForegroundColor $ProgressColor
 
     New-DirectoryIfMissing $AppDrive":\MSSQL\Backups"   -ErrorAction Continue -WarningAction Continue     #Backups
-                                                                
     New-DirectoryIfMissing $AppDrive":\MSSQL\Data"      -ErrorAction Continue -WarningAction Continue     #System DB
-                                                                
     New-DirectoryIfMissing $AppDrive":\MSSQL\Logs"      -ErrorAction Continue -WarningAction Continue     #System Logs
-                                                                                                                                
     New-DirectoryIfMissing $DataDrive":\MSSQL\Data"      -ErrorAction Continue -WarningAction Continue     #User DB
-                                                                
     New-DirectoryIfMissing $LogsDrive":\MSSQL\Logs"      -ErrorAction Continue -WarningAction Continue     #User Logs
-                                                                
     New-DirectoryIfMissing $TempDBDrive":\MSSQL\tempDB"       -ErrorAction Continue -WarningAction Continue     #TempDB
-
     New-DirectoryIfMissing $AppDrive":\temp\for_restore" -ErrorAction SilentlyContinue -WarningAction Continue -GrantAccessTo $SQLSVCACCOUNT    #for database moves
-
     New-DirectoryIfMissing $AppDrive":\login_audit"       -ErrorAction SilentlyContinue -WarningAction Continue -GrantAccessTo $SQLSVCACCOUNT    #for login_auditing 
 
 #endregion Create Directories
@@ -310,9 +299,8 @@ write-host "Creating required directories..." -ForegroundColor $ProgressColor
             Write-Host "    EXE CU path       : $cu_updatePath" -ForegroundColor $informationColor
             Write-host ""
             Write-Host "    Current Domain    : $DN" -ForegroundColor $informationColor
+
         #Installation Arguments
-
-
         #SQLInstall SPECIFIC
         [string]$AGTSVCACCOUNT= $SQLSVCACCOUNT     #SQL Agent Accont
 
@@ -395,7 +383,6 @@ write-host "Creating required directories..." -ForegroundColor $ProgressColor
         $arguments
     #endregion Define Install Arguments
 
-
     write-host ""
     write-host "↑↑↑Please review ↑↑↑" -ForegroundColor $PromptColor
     write-host ""
@@ -444,8 +431,6 @@ write-host "Creating required directories..." -ForegroundColor $ProgressColor
 
         Write-host "SQL Server Installation is complete, or cancelled." -foregroundcolor $ProgressColor
         write-host ""
-#        write-host "We're now ready to install the downloaded CU path for SQL Server!" -ForegroundColor $progressColor
-#        write-host ""
 
     #endregion Install SQL Server
 
@@ -454,7 +439,6 @@ write-host "Creating required directories..." -ForegroundColor $ProgressColor
     If (($ask1 -eq "") -or ($ask1 -eq "N")) {
         break
         }
-
 
     #region Install CU
         write-host ""
@@ -486,11 +470,11 @@ $ask1 = Read-Continue -message "
 
 SQL Server installers have completed their work.
 
-You should confirm the instance is running before continuing." -prompt "Would you like to proceed?" -color $ProgressColor
+You should confirm the instance is running before continuing on to configuring the new SQL Instance on $TargetName
+" -prompt "Would you like to proceed?" -color $ProgressColor
        If (($ask1 -eq "") -or ($ask1 -eq "N")) {
         break
         }
-
 
 #region Configure SQL Server
     write-host ""
@@ -501,97 +485,125 @@ You should confirm the instance is running before continuing." -prompt "Would yo
 
     #Source enable remote admin
         #Some commands require DAC (dedicated access control) on the Source 
-            write-host ""
-            write-host "    Enabling Remote Administration of $SourceName..." -ForegroundColor $ProgressColor
+        write-host ""
+        write-host "    Enabling Remote Administration of $SourceName..." -ForegroundColor $ProgressColor
 
-            Invoke-Sqlcmd -ServerInstance $SourceServer.name -Database master -Query "EXEC sp_configure 'remote admin connections', 1" -TrustServerCertificate
-            Invoke-Sqlcmd -ServerInstance $SourceServer.name -Database master -Query "RECONFIGURE" -TrustServerCertificate
-            write-host "        Done." -ForegroundColor $InformationColor
+        Invoke-Sqlcmd -ServerInstance $SourceServer.name -Database master -Query "EXEC sp_configure 'remote admin connections', 1" -TrustServerCertificate
+        Invoke-Sqlcmd -ServerInstance $SourceServer.name -Database master -Query "RECONFIGURE" -TrustServerCertificate
+        write-host "        Done." -ForegroundColor $InformationColor
 
     #Allow Ole Automation
-            write-host ""
-            write-host "    Enabling OLE automation on $TargetName..." -ForegroundColor $ProgressColor
+        write-host ""
+        write-host "    Enabling OLE automation on $TargetName..." -ForegroundColor $ProgressColor
 
-            Invoke-Sqlcmd -ServerInstance $targetserver.name -Database master -Query "EXEC sp_configure 'show advanced options', 1" -TrustServerCertificate
-            Invoke-Sqlcmd -ServerInstance $TargetServer.name -Database master -Query "RECONFIGURE" -TrustServerCertificate
-            Invoke-Sqlcmd -ServerInstance $targetserver.name -Database master -Query "EXEC sp_configure 'Ole Automation Procedures', 1" -TrustServerCertificate
-            Invoke-Sqlcmd -ServerInstance $TargetServer.name -Database master -Query "RECONFIGURE" -TrustServerCertificate
+        Invoke-Sqlcmd -ServerInstance $targetserver.name -Database master -Query "EXEC sp_configure 'show advanced options', 1" -TrustServerCertificate
+        Invoke-Sqlcmd -ServerInstance $TargetServer.name -Database master -Query "RECONFIGURE" -TrustServerCertificate
+        Invoke-Sqlcmd -ServerInstance $targetserver.name -Database master -Query "EXEC sp_configure 'Ole Automation Procedures', 1" -TrustServerCertificate
+        Invoke-Sqlcmd -ServerInstance $TargetServer.name -Database master -Query "RECONFIGURE" -TrustServerCertificate
 
-            write-host "        Done." -ForegroundColor $InformationColor
-
-
+        write-host "        Done." -ForegroundColor $InformationColor
+    
     #region SQL Config
 
-        #region Copy SQL Server Logins
+    #region Copy SQL Server Logins
 
+        write-host ""
+        write-host "    Copying SQL Server logins from"$SourceServer.ComputerNamePhysicalNetBIOS"..." -ForegroundColor $ProgressColor
+
+        # Copy Enabled, non-system Logins
+        $sourceLogins = Get-DbaLogin -SqlInstance $SourceServer -ExcludeSystemLogin -ExcludeFilter "NT *" | Where-Object IsDisabled -Like "False" 
+        $Sourcelogins | Copy-DbaLogin -Destination $TargetServer #-WhatIf
+
+        write-host "        Done." -ForegroundColor $InformationColor
+
+    #endregion Copy SQL Server Logins
+
+    #region Copy Credentials
+        write-host ""
+        write-host "    Copying SQL Server credentials from"$SourceServer.ComputerNamePhysicalNetBIOS"..." -ForegroundColor $ProgressColor
+
+        Copy-DbaCredential -Source $sourceServer -Destination $targetServer
+        write-host "        Done." -ForegroundColor $InformationColor
+
+    #endregion Copy Credentials
+
+    #region Linked Servers
+
+        # Requires SQL Browser service?
+
+            #Start SQL Browser service
+            #Start-DbaService -ComputerName $SourceServer,$TargetServer -Type Browser  -ErrorAction stop -WarningAction Continue -InformationAction Continue
+
+            #Copy linked Servers
             write-host ""
-            write-host "    Copying SQL Server logins from"$SourceServer.ComputerNamePhysicalNetBIOS"..." -ForegroundColor $ProgressColor
+            write-host "    Copying SQL Server LINKED SERVERS from"$SourceServer.ComputerNamePhysicalNetBIOS"..." -ForegroundColor $ProgressColor
 
-            # Copy Enabled, non-system Logins
-            $sourceLogins = Get-DbaLogin -SqlInstance $SourceServer -ExcludeSystemLogin -ExcludeFilter "NT *" | Where-Object IsDisabled -Like "False" 
-            $Sourcelogins | Copy-DbaLogin -Destination $TargetServer #-WhatIf
-
+            Copy-DbaLinkedServer -Source $sourceServer -Destination $TargetServer -UpgradeSqlClient
             write-host "        Done." -ForegroundColor $InformationColor
 
-         #endregion Copy SQL Server Logins
+            #Stop SQL browser service
+            #Stop-DbaService -ComputerName $sourceServer, $TargetServer -Type Browser -ErrorAction stop -WarningAction Continue -InformationAction Continue
 
-        #region Copy Credentials
-            write-host ""
-            write-host "    Copying SQL Server credentials from"$SourceServer.ComputerNamePhysicalNetBIOS"..." -ForegroundColor $ProgressColor
-
-            Copy-DbaCredential -Source $sourceServer -Destination $targetServer
-            write-host "        Done." -ForegroundColor $InformationColor
-
-        #endregion Copy Credentials
-
-        #region Linked Servers
-
-            # Requires SQL Browser service?
-
-                #Start SQL Browser service
-                #Start-DbaService -ComputerName $SourceServer,$TargetServer -Type Browser  -ErrorAction stop -WarningAction Continue -InformationAction Continue
-
-                #Copy linked Servers
-                write-host ""
-                write-host "    Copying SQL Server LINKED SERVERS from"$SourceServer.ComputerNamePhysicalNetBIOS"..." -ForegroundColor $ProgressColor
-
-                Copy-DbaLinkedServer -Source $sourceServer -Destination $TargetServer -UpgradeSqlClient
-                write-host "        Done." -ForegroundColor $InformationColor
-
-                #Stop SQL browser service
-                #Stop-DbaService -ComputerName $sourceServer, $TargetServer -Type Browser -ErrorAction stop -WarningAction Continue -InformationAction Continue
-
-        #endregion Linked Servers
+    #endregion Linked Servers
      
-        #region SQL Agent Objects
-            # https://docs.dbatools.io/Copy-DbaAgentServer
-            # Copies all SQL Server Agent objects and server properties between instances.
-            # Incl: Jobs, Opoerators, Alerts, Schedules, Job Categories, Proxies, and SQL Agent Properties
-                
-            #Copy _DbaAdmin database
+    #region SQL Agent Objects
+            
+        #region _DbaAdmin database
+        write-host ""
+        write-host "    Copying database _DBAAdmin from"$SourceServer.ComputerNamePhysicalNetBIOS"..." -ForegroundColor $ProgressColor
 
-                write-host ""
-                write-host "    Copying database _DBAAdmin from"$SourceServer.ComputerNamePhysicalNetBIOS"..." -ForegroundColor $ProgressColor
+            Copy-DbaDatabase -Source $SourceServer `
+                -Destination $TargetServer `
+                -Database _DBAAdmin `
+                -BackupRestore `
+                -WithReplace `
+                -SharedPath $sharedPath
 
-                    Copy-DbaDatabase -Source $SourceServer `
-                        -Destination $TargetServer `
-                        -Database _DBAAdmin `
-                        -BackupRestore `
-                        -WithReplace `
-                        -SharedPath $sharedPath
+            Invoke-DbaQuery -SqlInstance $TargetServer -Database _DBAAdmin -Query "Truncate table dbo.CommandLog" -ErrorAction Continue -WarningAction Continue
 
-                Invoke-DbaQuery -SqlInstance $TargetServer -Database _DBAAdmin -Query "Truncate table dbo.CommandLog"
+        write-host "        Done." -ForegroundColor $InformationColor
+        #endregion _DbaAdmin database
 
-                write-host "        Done." -ForegroundColor $InformationColor
+        #region Login_Audit database
+        $LoginAuditExists = Connect-DbaInstance -SqlInstance $sourceServer -database Login_audit -TrustServerCertificate -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
 
-                write-host ""
-                write-host "    Copying SQL Server AGENT objects from"$SourceServer.ComputerNamePhysicalNetBIOS"..." -ForegroundColor $ProgressColor
-        
-                    Copy-DbaAgentServer -Source $sourceServer -Destination $TargetServer
+        If ($LoginAuditExists) {
+            write-host "    Copying database Login_Audit from"$SourceServer.ComputerNamePhysicalNetBIOS"..." -ForegroundColor $ProgressColor
 
-                write-host "        Done." -ForegroundColor $InformationColor
+                Copy-DbaDatabase -Source $SourceServer `
+                    -Destination $TargetServer `
+                    -Database Login_Audit `
+                    -BackupRestore `
+                    -WithReplace `
+                    -SharedPath $sharedPath
+            
+                #Cleanup and reset login_Audit configuration
+                Invoke-DbaQuery -SqlInstance $TargetServer -Database Login_audit -Query "Exec dbo.ResetCollectionTables"
 
-        #endregion SQL Agent Objects
+                [string]$tsql = "UPDATE dbo.tbl_Parameters SET paramValue = '" + $targetname + "' WHERE paramName = 'SQLInstanceName'"
+                    Invoke-DbaQuery -SqlInstance $TargetServer -Database Login_audit -Query   $TSQL
+
+                [string]$tsql = "UPDATE dbo.tbl_Parameters SET paramValue = '" + $appDrive + ":\login_audit" + "\" + $targetname + "' WHERE paramName = 'Transaction_Audit_Path'"
+                    Invoke-DbaQuery -SqlInstance $TargetServer -Database Login_audit -Query   $TSQL
+
+                        Copy-DbaAgentJob -Source $SourceServer -Destination $TargetServer -Job "Login Audit CycleTranTrace" -Force
+                        Start-DbaAgentJob -SqlInstance $TargetServer -Job "Login Audit CycleTranTrace"
+
+            write-host "        Done." -ForegroundColor $InformationColor
+
+            }
+        #endregion Login_Audit database
+
+        #region SQL Agent Jobs
+        write-host ""
+        write-host "    Copying SQL Server AGENT objects from"$SourceServer.ComputerNamePhysicalNetBIOS"..." -ForegroundColor $ProgressColor
+
+            Copy-DbaAgentServer -Source $sourceServer -Destination $TargetServer
+
+        write-host "        Done." -ForegroundColor $InformationColor
+        #endregion SQL Agent Jobs
+
+    #endregion SQL Agent Objects
 
     #endregion SQL Config
 
